@@ -1,0 +1,15 @@
+socket: /run/notifier.sock
+
+smtp:
+    host: localhost
+    port: 25
+    from: notifier@example.com
+    to: CHANNEL-EMAIL@WORKSPACE.slack.com
+    subject: "Notification: {{KEY}}"
+    body: "{{VALUE}}"
+
+commands:
+    - "echo \"{{KEY}} => {{VALUE}}\" >> /tmp/notifier.tmp"
+    - "/usr/bin/zabbix_sender -c /etc/zabbix/zabbix.conf" -k \"{{KEY}}\" -o \"{{VALUE}}\""
+
+
