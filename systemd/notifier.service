@@ -1,0 +1,15 @@
+[Unit]
+Description=Receives messages on /run/notifier.sock and process them
+
+[Service]
+User=www-data
+Group=www-data
+Type=simple
+ExecStart=/usr/bin/notifier --config /etc/notifier/config.yaml
+Restart=always
+RestartSec=30s
+
+[Install]
+WantedBy=multi-user.target
+
+
