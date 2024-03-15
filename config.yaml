@@ -1,15 +1,28 @@
-socket: /run/notifier.sock
+input:
+  sockets:
+    - type: unix
+      address: /run/notifier.sock
+    - type: tcp
+      address: 127.0.0.1:1111
+  folder:
+    path: /run/notifier/
+    file-prefix: "notifier-"
+    file-suffix: ".json"
 
 smtp:
-    host: localhost
+    #host: localhost
     port: 25
     from: notifier@example.com
     to: CHANNEL-EMAIL@WORKSPACE.slack.com
     subject: "Notification: {{KEY}}"
     body: "{{VALUE}}"
 
-commands:
-    - "echo \"{{KEY}} => {{VALUE}}\" >> /tmp/notifier.tmp"
-    - "/usr/bin/zabbix_sender -c /etc/zabbix/zabbix.conf" -k \"{{KEY}}\" -o \"{{VALUE}}\""
+output-sockets:
+  #- type: udp
+  #  address: 127.0.0.1:5555
+  #  message: "- \"{{KEY}}\" \"{{VALUE}}\""
 
+shell-commands:
+    - "echo \"{{KEY}} => {{VALUE}}\" >> /tmp/notifier.tmp"
+    - "/usr/bin/zabbix_sender -c /etc/zabbix/zabbix_agent2.conf -k \"{{KEY}}\" -o \"{{VALUE}}\""
 

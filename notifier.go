@@ -5,21 +5,41 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"io/fs"
 	"log"
 	"net"
 	"net/smtp"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/spf13/viper"
 )
 
+type _inSocketConfig struct {
+	Type    string `mapstructure:"type"`
+	Address string `mapstructure:"address"`
+}
+
+type _inFolderConfig struct {
+	Path       string `mapstructure:"path"`
+	FilePrefix string `mapstructure:"file-prefix"`
+	FileSuffix string `mapstructure:"file-suffix"`
+}
+
+type _outSocketConfig struct {
+	Type    string `mapstructure:"type"`
+	Address string `mapstructure:"address"`
+	Message string `mapstructure:"message"`
+}
+
 type _config struct {
-	socketPath string
+	inputSockets []_inSocketConfig
+	inputFolder  _inFolderConfig
 
 	// smtp host to send message
-	hasSmtp     bool
 	smtpHost    string
 	smtpPort    string
 	smtpUser    string
@@ -32,11 +52,47 @@ type _config struct {
 	smtpServer string
 	smtpAuth   smtp.Auth
 
+	outputSockets []_outSocketConfig
+
 	// external commands to execute
-	commands []string
+	shellCommands []string
 }
 
 var Config = _config{}
+
+func main() {
+	var configName string
+	flag.StringVar(&configName, "config", "", "yaml config file name without extension")
+	flag.Parse()
+
+	if configName == "" {
+		log.Fatalf("USAGE: notifier config.yaml")
+	}
+
+	initConfig(configName)
+	loadConfig()
+
+	messages := make(chan string, 1000)
+
+	for _, socketPath := range Config.inputSockets {
+		go listenOnSocket(socketPath, messages)
+	}
+
+	if Config.inputFolder.Path != "" {
+		go func() {
+			for {
+				scanInputFolder(messages)
+				time.Sleep(time.Second)
+			}
+		}()
+	}
+
+	for {
+		msg := <-messages
+		msg = strings.TrimSpace(msg)
+		handleMessage(msg)
+	}
+}
 
 func initConfig(configName string) {
 	if configName != "" {
@@ -54,12 +110,20 @@ func initConfig(configName string) {
 	}
 }
 
+// ========================================================
+// CONFIG
+// ========================================================
 func loadConfig() {
-	Config.socketPath = viper.GetString("socket")
-	if Config.socketPath == "" {
-		log.Fatalf("Missing is missing \"socket\" file path")
+	// input
+	if err := viper.UnmarshalKey("input.sockets", &Config.inputSockets); err != nil {
+		log.Fatalf("Missing \"input.sockets\": %s", err)
 	}
 
+	if err := viper.UnmarshalKey("input.folder", &Config.inputFolder); err != nil {
+		log.Fatalf("Error in \"input.folder\": %s", err)
+	}
+
+	// output
 	Config.smtpHost = viper.GetString("smtp.host")
 	Config.smtpPort = viper.GetString("smtp.port")
 	Config.smtpFrom = viper.GetString("smtp.from")
@@ -70,8 +134,6 @@ func loadConfig() {
 	Config.smtpBody = viper.GetString("smtp.body")
 
 	if Config.smtpHost != "" && Config.smtpTo != "" && Config.smtpFrom != "" {
-		Config.hasSmtp = true
-
 		if Config.smtpPort == "" {
 			Config.smtpPort = "25"
 		}
@@ -88,69 +150,120 @@ func loadConfig() {
 			Config.smtpBody = "{{VALUE}}"
 		}
 	}
-	Config.commands = viper.GetStringSlice("commands")
+
+	if err := viper.UnmarshalKey("output-sockets", &Config.outputSockets); err != nil {
+		log.Fatalf("Failed to load sockets: %s", err)
+	}
+
+	Config.shellCommands = viper.GetStringSlice("shell-commands")
 }
 
-func main() {
-	var configName string
-	flag.StringVar(&configName, "config", "", "yaml config file name without extension")
-	flag.Parse()
-
-	if configName == "" {
-		log.Fatalf("USAGE: notifier config.yaml")
-	}
-
-	initConfig(configName)
-	loadConfig()
-
-	// Start unix socket
-	os.Remove(Config.socketPath)
-	listener, err := net.Listen("unix", Config.socketPath)
-	if err != nil {
-		fmt.Println("Error listening on socket:", err)
+// ========================================================
+// HANDLE INBOUND TRAPS
+// ========================================================
+func listenOnSocket(in_conf _inSocketConfig, messages chan<- string) {
+	if in_conf.Type == "udp" {
+		log.Fatalf("udp sockets are not supported")
 		return
 	}
-	defer listener.Close()
 
-	fmt.Println("Listening on", Config.socketPath)
+	if in_conf.Type == "unix" {
+		// Remove the socket file if it already exists
+		os.Remove(in_conf.Address)
+		defer os.Remove(in_conf.Address)
+	}
+
+	l, err := net.Listen(in_conf.Type, in_conf.Address)
+	if err != nil {
+		log.Fatalf("Error listening on socket %s: %v", in_conf.Address, err)
+	}
+	defer l.Close()
+
 	for {
-		// Accept new connection
-		conn, err := listener.Accept()
+		conn, err := l.Accept()
 		if err != nil {
-			log.Fatalf("Error accepting connection: %s", err)
+			log.Printf("Error accepting connection on socket %s: %v", in_conf.Address, err)
 			continue
 		}
 
-		// Handle connection in a new goroutine
-		go handleConnection(conn)
+		go func(c net.Conn) {
+			defer c.Close()
+
+			msg, err := io.ReadAll(conn)
+			if err != nil {
+				log.Printf("Error reading from connection on socket %s: %v", in_conf.Address, err)
+				return
+			}
+
+			messages <- string(msg)
+		}(conn)
 	}
 }
 
-func handleConnection(conn net.Conn) {
-	defer conn.Close()
+func scanInputFolder(messages chan<- string) {
+	err := filepath.WalkDir(Config.inputFolder.Path, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() {
+			return nil // skip directories
+		}
 
-	// Read message from connection
-	msg, err := io.ReadAll(conn)
+		fileName := d.Name()
+
+		if Config.inputFolder.FilePrefix != "" &&
+			!strings.HasPrefix(fileName, Config.inputFolder.FilePrefix) {
+			return nil
+		}
+		if Config.inputFolder.FileSuffix != "" &&
+			!strings.HasSuffix(fileName, Config.inputFolder.FileSuffix) {
+			return nil
+		}
+
+		content, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+
+		if err := os.Remove(path); err != nil {
+			return err
+		}
+
+		messages <- string(content)
+		return nil
+	})
+
 	if err != nil {
-		fmt.Println("Error reading message:", err)
-		return
+		log.Printf("Error scanning directory: %v\n", err)
 	}
+}
 
-	// Unmarshal JSON into a map
+// ========================================================
+// PROCESS OUTGOING TRAPS
+// ========================================================
+func handleMessage(msg string) {
 	var data map[string]interface{}
-	if err := json.Unmarshal(msg, &data); err != nil {
+	if err := json.Unmarshal([]byte(msg), &data); err != nil {
 		fmt.Println("Error decoding JSON:", err)
 		return
 	}
 
 	// Print received key-value pairs
-	for key, value := range data {
-		fmt.Printf("%s: %v\n", key, value)
-		if Config.smtpHost != "" {
-			sendEmail(key, value.(string))
+	for key, value_iface := range data {
+		value := value_iface.(string)
+
+		if Config.smtpServer != "" {
+			sendEmail(key, value)
 		}
-		if len(Config.commands) > 0 {
-			processCommands(key, value.(string))
+
+		for _, out_conf := range Config.outputSockets {
+			sendToSocket(out_conf, key, value)
+		}
+
+		for _, cmd := range Config.shellCommands {
+			cmd = strings.Replace(cmd, "{{KEY}}", key, -1)
+			cmd = strings.Replace(cmd, "{{VALUE}}", value, -1)
+			execCommand(cmd)
 		}
 	}
 }
@@ -174,13 +287,24 @@ func sendEmail(key string, value string) {
 	}
 }
 
-func processCommands(key string, value string) {
-	commands := viper.GetStringSlice("commands")
+func sendToSocket(out_conf _outSocketConfig, key string, value string) {
+	conn, err := net.Dial(out_conf.Type, out_conf.Address)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to connect to socket: %v\n", err)
+		return
+	}
+	defer conn.Close() // Ensure the connection is closed when finished
 
-	for _, cmd := range commands {
-		cmd = strings.Replace(cmd, "{{KEY}}", key, -1)
-		cmd = strings.Replace(cmd, "{{VALUE}}", value, -1)
-		execCommand(cmd)
+	// The message to send
+	message := out_conf.Message
+	message = strings.Replace(message, "{{KEY}}", key, -1)
+	message = strings.Replace(message, "{{VALUE}}", value, -1)
+
+	// Send the message
+	_, err = conn.Write([]byte(message))
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to write to socket: %v\n", err)
+		return
 	}
 }
 
