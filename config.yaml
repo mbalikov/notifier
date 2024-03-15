@@ -10,7 +10,7 @@ input:
     file-suffix: ".json"
 
 smtp:
-    #host: localhost
+    host: localhost
     port: 25
     from: notifier@example.com
     to: CHANNEL-EMAIL@WORKSPACE.slack.com
