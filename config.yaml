@@ -1,7 +1,11 @@
+# message queue, when reached input will block
 queue_size: 1000
+
+# try to keep methods' goroutines bellow this number
 workers: 1000
 
-# in milliseconds
+# Global timeouts in milliseconds
+# Eech input/output can have own timeout setting
 input_timeout: 1000
 output_timeout: 1000
 exec_timeout: 1000
@@ -12,6 +16,7 @@ inputs:
       address: /run/notifier.sock
     - type: tcp
       address: 127.0.0.1:1111
+      timeout: 1000
   folders:
     - path: /run/notifier/
       file-prefix: "notifier-"
@@ -34,24 +39,28 @@ methods:
         to: t1-tracking-aaaalack6ydmjqwe7cdvsqwn34@vedamo-group.slack.com
         subject: 'Notification: {{$.subject}}'
         body: '{{$.body}}'
+        timeout: 5000
   zabbix:
     socket:
       - type: unix
         address: /run/zabbix/sender.sock
         message: "- \"{{$.key}}\" \"{{$.value}}\""
+        timeout: 1000
     #exec:
     #  - cmd: /usr/bin/zabbix_sender
-    #     args:
+    #    args:
     #        - '-c'
     #        - '/etc/zabbix/zabbix_agent2.conf'
-    #        - '-k' 
-    #        - '"{{$.key}}"' 
-    #        - "-o" 
+    #        - '-k'
+    #        - '"{{$.key}}"'
+    #        - "-o"
     #        - '"{{$.value}}"'
+    #    timeout: 10000
   log:
     http:
-      - url: http://localhost:8888/cobrowser/json-rpc/
+      - url: https://example.com/log/json-rpc/
         method: POST
         headers:
-          - content-type: "application/json"
+          - Content-Type: "application/json"
+            Authorization: Bearer {{$.token}}
         body: '{ "method": "notify", "params": {{$}}'
