@@ -1,28 +1,57 @@
-input:
+queue_size: 1000
+workers: 1000
+
+# in milliseconds
+input_timeout: 1000
+output_timeout: 1000
+exec_timeout: 1000
+
+inputs:
   sockets:
     - type: unix
       address: /run/notifier.sock
     - type: tcp
       address: 127.0.0.1:1111
-  folder:
-    path: /run/notifier/
-    file-prefix: "notifier-"
-    file-suffix: ".json"
+  folders:
+    - path: /run/notifier/
+      file-prefix: "notifier-"
+      file-suffix: ".json"
+      scan-time: 1000      # milliseconds
+  pipes:
+    - path: /run/notifier.pipe
+  http:
+    - address: 127.0.0.1:8080
 
-smtp:
-    host: localhost
-    port: 25
-    from: notifier@example.com
-    to: CHANNEL-EMAIL@WORKSPACE.slack.com
-    subject: "Notification: {{KEY}}"
-    body: "{{VALUE}}"
-
-output-sockets:
-  #- type: udp
-  #  address: 127.0.0.1:5555
-  #  message: "- \"{{KEY}}\" \"{{VALUE}}\""
-
-shell-commands:
-    - "echo \"{{KEY}} => {{VALUE}}\" >> /tmp/notifier.tmp"
-    - "/usr/bin/zabbix_sender -c /etc/zabbix/zabbix_agent2.conf -k \"{{KEY}}\" -o \"{{VALUE}}\""
-
+methods:
+  default:
+  slack-email:
+    email:
+      - smtp-host: localhost
+        smtp-port: 25
+        #smtp-user: notifier@example.com
+        #smtp-pass: 123456
+        from: notifier@vedamo.com
+        to: t1-tracking-aaaalack6ydmjqwe7cdvsqwn34@vedamo-group.slack.com
+        subject: 'Notification: {{$.subject}}'
+        body: '{{$.body}}'
+  zabbix:
+    socket:
+      - type: unix
+        address: /run/zabbix/sender.sock
+        message: "- \"{{$.key}}\" \"{{$.value}}\""
+    #exec:
+    #  - cmd: /usr/bin/zabbix_sender
+    #     args:
+    #        - '-c'
+    #        - '/etc/zabbix/zabbix_agent2.conf'
+    #        - '-k' 
+    #        - '"{{$.key}}"' 
+    #        - "-o" 
+    #        - '"{{$.value}}"'
+  log:
+    http:
+      - url: http://localhost:8888/cobrowser/json-rpc/
+        method: POST
+        headers:
+          - content-type: "application/json"
+        body: '{ "method": "notify", "params": {{$}}'

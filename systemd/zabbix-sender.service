@@ -1,0 +1,18 @@
+[Unit]
+Description=Receives messages on /run/zabbix/sender.sock
+
+[Service]
+Type=simple
+
+Environment="SOCKET_PATH=/run/zabbix/sender.sock" 
+Environment="ZABBIX_CONF=/etc/zabbix/zabbix_agent2.conf"
+ExecStartPre=bash -c "if [[ -S ${SOCKET_PATH} ]]; then unlink ${SOCKET_PATH}; fi"
+ExecStart=bash -c "socat unix-listen:${SOCKET_PATH},fork stdout | tee >(cat >&2) | (while true; do zabbix_sender -c ${ZABBIX_CONF} -r -i -; sleep 1; done)"
+ExecStartPre=bash -c "if [[ -S ${SOCKET_PATH} ]]; then unlink ${SOCKET_PATH}; fi"
+Restart=always
+RestartSec=5s
+
+[Install]
+WantedBy=multi-user.target
+
+

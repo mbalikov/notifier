@@ -2,9 +2,13 @@ module github.com/mbalikov/notifier
 
 go 1.22.1
 
-require github.com/spf13/viper v1.18.2
+require (
+	github.com/PaesslerAG/jsonpath v0.1.1
+	github.com/spf13/viper v1.18.2
+)
 
 require (
+	github.com/PaesslerAG/gval v1.0.0 // indirect
 	github.com/fsnotify/fsnotify v1.7.0 // indirect
 	github.com/hashicorp/hcl v1.0.0 // indirect
 	github.com/magiconair/properties v1.8.7 // indirect
