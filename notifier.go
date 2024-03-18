@@ -46,6 +46,7 @@ func main() {
 				if !stopped {
 					log.Print("Received SIGTERM: try to stop gracefully")
 					close(Context.StopChan)
+					Context.ActiveInputs.Wait()
 					stopped = true
 				}
 			} else if sig == syscall.SIGHUP {
@@ -59,7 +60,6 @@ func main() {
 			}
 		default:
 			if stopped {
-				Context.ActiveInputs.Wait()
 				for ActiveWorkers.Get() > 0 {
 					time.Sleep(100 * time.Millisecond)
 				}
