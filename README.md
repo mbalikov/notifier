@@ -70,3 +70,14 @@ Check config.yaml for detailed examples.
 3. On signal SIGHUP(1) will reload the config file with minimum downtime.
 4. All input sockets are with SO_REUSEPORT, so several processes could be started to process in parallel.
 
+
+## Build
+```
+go mod tidy
+go build
+mv notifier /usr/local/bin/
+mkdir /etc/notifier/
+mv config.yaml /etc/notifier/
+systemctl enable ./systemd/notifier.service
+```
+
