@@ -35,8 +35,8 @@ methods:
         smtp-port: 25
         #smtp-user: notifier@example.com
         #smtp-pass: 123456
-        from: notifier@vedamo.com
-        to: t1-tracking-aaaalack6ydmjqwe7cdvsqwn34@vedamo-group.slack.com
+        from: notifier@example.com
+        to: CHANNEL-EMAIL@WORKSPACE.slack.com
         subject: 'Notification: {{$.subject}}'
         body: '{{$.body}}'
         timeout: 5000
